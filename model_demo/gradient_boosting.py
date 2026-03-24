@@ -63,9 +63,9 @@ def candidate_thresholds(values: pd.Series) -> list[float]:
 
 
 def evaluate_split_candidates(
-    frame: pd.DataFrame,
-    features: list[str],
-    min_leaf_size: int,
+        frame: pd.DataFrame,
+        features: list[str],
+        min_leaf_size: int,
 ) -> pd.DataFrame:
     parent_error = squared_error(frame["residual"])
     rows = []
@@ -110,10 +110,10 @@ def evaluate_split_candidates(
 
 
 def fit_tree(
-    frame: pd.DataFrame,
-    features: list[str],
-    depth: int,
-    min_leaf_size: int,
+        frame: pd.DataFrame,
+        features: list[str],
+        depth: int,
+        min_leaf_size: int,
 ) -> TreeNode:
     node = TreeNode(
         prediction=float(frame["residual"].mean()),
@@ -269,11 +269,11 @@ def tree_to_graphviz(node: TreeNode, customer: ProbeCustomer | None = None) -> s
 
 
 def train_gradient_boosting_demo(
-    frame: pd.DataFrame,
-    rounds: int = 2,
-    learning_rate: float = 0.9,
-    depth: int = 2,
-    min_leaf_size: int = 4,
+        frame: pd.DataFrame,
+        rounds: int = 2,
+        learning_rate: float = 0.9,
+        depth: int = 2,
+        min_leaf_size: int = 4,
 ) -> GradientBoostingModel:
     base_rate = float(frame["accepted"].mean())
     base_score = log(base_rate / (1.0 - base_rate))
@@ -353,7 +353,7 @@ def candidate_summary(node: TreeNode) -> pd.DataFrame:
 
 
 def score_customer(
-    model: GradientBoostingModel, customer: ProbeCustomer
+        model: GradientBoostingModel, customer: ProbeCustomer
 ) -> dict[str, object]:
     raw_score = model.base_score
     round_rows = []

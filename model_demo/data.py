@@ -44,10 +44,10 @@ def existing_status_for(existing_customer: int) -> str:
 
 
 def outcome_rule(
-    age: float,
-    income: float,
-    existing_customer: int,
-    scenario: str,
+        age: float,
+        income: float,
+        existing_customer: int,
+        scenario: str,
 ) -> int:
     if scenario == "two_clusters":
         return int(
