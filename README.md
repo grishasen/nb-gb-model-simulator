@@ -24,20 +24,6 @@ This supports two different lessons:
 - Naive Bayes can add evidence from age and income, but it does not create a learned rule that says "income matters only inside the younger segment"
 - Gradient boosting can learn exactly that kind of path with a tree
 - With the second scenario, a later tree can pivot to a different feature and explain a second leftover cluster
-
-## Why Streamlit Instead Of Excel
-
-Excel can explain the Naive Bayes side reasonably well because the binning, counts, and log-odds tables fit naturally into worksheets.
-
-The gradient boosting side is where Streamlit is much stronger:
-
-- showing split candidates during training
-- stepping through multiple boosting rounds
-- tracing a selected customer down a tree path
-- comparing how the same feature change behaves differently under NB and GB
-
-For this demo, Streamlit is the better primary format. If needed later, an Excel workbook can still be added as a companion artifact for the NB formulas.
-
 ## Run
 
 ```bash
