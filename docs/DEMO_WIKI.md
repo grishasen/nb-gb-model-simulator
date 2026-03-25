@@ -31,6 +31,9 @@ Use the sidebar to control:
 
 ## Scenario 1: Single Positive Region
 
+<img alt="image" src="https://github.com/user-attachments/assets/a634f551-bacb-406f-ab26-00e09574f274" />
+
+
 ### Hidden Rule
 
 Positive only if:
@@ -39,6 +42,9 @@ Positive only if:
 - and `income >= 11000`
 
 This is the cleanest scenario for teaching a single interaction.
+
+<img alt="NB Overview" src="https://github.com/user-attachments/assets/a2a6cf0c-9f3d-4a0f-a60f-18c660f8f78a" />
+
 
 ### Recommended Live Walkthrough
 
@@ -109,6 +115,11 @@ This scenario is designed to make a later tree useful for a different leftover p
 10. Show that Naive Bayes can give positive evidence for `existing customer` and for `low income`, but it still adds them as separate terms.
 11. Open `Compare`.
 12. Highlight that gradient boosting can use different trees to cover different leftover regions, while Naive Bayes still stays additive.
+
+<img alt="Tree 1" src="https://github.com/user-attachments/assets/4cad8695-a759-4a88-93db-b3344120901a" />
+
+<img alt="Tree 2" src="https://github.com/user-attachments/assets/6ae47a55-0405-43f1-b616-951847a8d3dc" />
+
 
 ### What To Say
 
