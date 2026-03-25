@@ -7,11 +7,13 @@ import streamlit as st
 from model_demo.data import (
     SCENARIO_DESCRIPTIONS,
     SCENARIO_LABELS,
+    build_holdout_data,
     build_probe_customer,
     build_rule_regions,
     build_training_data,
     pretty_training_table,
 )
+from model_demo.evaluation import build_metric_table
 from model_demo.gradient_boosting import (
     candidate_summary,
     format_tree_as_code,
@@ -184,9 +186,15 @@ probe_income = st.sidebar.slider(
 probe_existing = st.sidebar.checkbox("Existing customer", value=False)
 
 training_data = build_training_data(scenario)
+holdout_data = build_holdout_data(scenario) if scenario == "messy_real_world" else None
 nb_model = train_naive_bayes(training_data)
 gb_model = train_gradient_boosting_demo(training_data)
 probe = build_probe_customer(probe_age, probe_income, int(probe_existing))
+metric_table = (
+    build_metric_table(nb_model, gb_model, training_data, holdout_data)
+    if holdout_data is not None
+    else None
+)
 nb_contribution_limit = max(
     abs(value)
     for table in nb_model.feature_tables.values()
@@ -221,6 +229,7 @@ with tab_story:
 
     with left:
         chart_data = training_data.assign(outcome=training_data["accepted_label"])
+        point_size = 120 if scenario == "messy_real_world" else 220
         chart_spec = {
             "layer": [
                 {
@@ -245,7 +254,7 @@ with tab_story:
                 },
                 {
                     "data": {"values": chart_data.to_dict("records")},
-                    "mark": {"type": "circle", "size": 220, "opacity": 0.9},
+                    "mark": {"type": "circle", "size": point_size, "opacity": 0.9},
                     "encoding": {
                         "column": {
                             "field": "existing_status",
@@ -284,16 +293,33 @@ with tab_story:
             "height": 420,
         }
         st.vega_lite_chart(chart_data, chart_spec, width='stretch')
-        st.caption("The shaded block is the hidden rule that generated positive outcomes.")
+        if scenario == "messy_real_world":
+            st.caption(
+                "The shaded blocks mark the main higher-propensity regions. In this scenario they are not perfect rules, so you will still see mixed accepted and rejected examples inside and outside those areas."
+            )
+        else:
+            st.caption("The shaded block is the hidden rule that generated positive outcomes.")
 
     with right:
-        st.subheader("Current hidden rule")
+        st.subheader("Current hidden pattern")
         if scenario == "two_clusters":
             st.markdown(
                 """
                 - Positive if `age < 35 and income >= 11000`
                 - Or positive if `existing customer = yes and income <= 9000`
                 """
+            )
+        elif scenario == "messy_real_world":
+            st.markdown(
+                """
+                - Higher probability if `age < 35 and income >= 11000`
+                - Higher probability if `existing customer = yes and income <= 9000`
+                - Local exception: very young, low-income new customers are often still negative
+                - Local exception: older, high-income new customers are less responsive than the broad bins suggest
+                """
+            )
+            st.info(
+                f"Train rows: {len(training_data)}. Holdout rows: {len(holdout_data) if holdout_data is not None else 0}."
             )
         else:
             st.markdown("- Positive if `age < 35 and income >= 11000`")
@@ -321,8 +347,19 @@ with tab_story:
             column_config={
                 "Age": st.column_config.NumberColumn("Age", format="%d"),
                 "Income": st.column_config.NumberColumn("Income", format="$%d"),
-            }
+            },
+            height=320,
         )
+    if holdout_data is not None:
+        with st.expander("Holdout dataset"):
+            show_table(
+                pretty_training_table(holdout_data),
+                column_config={
+                    "Age": st.column_config.NumberColumn("Age", format="%d"),
+                    "Income": st.column_config.NumberColumn("Income", format="$%d"),
+                },
+                height=320,
+            )
 
 with tab_nb:
     st.subheader("Naive Bayes: Independent evidence from each feature")
@@ -763,7 +800,13 @@ with tab_gb:
 
 with tab_compare:
     st.header("Compare the Models")
-    st.subheader("Same feature change, different model behavior")
+    if scenario == "messy_real_world":
+        st.subheader("Why gradient boosting usually wins on messier real-life structure")
+        st.info(
+            "This scenario adds overlap, noise, and local exceptions. Both models use the same three features, but NB must average within broad bins while GB can still form local split paths."
+        )
+    else:
+        st.subheader("Same feature change, different model behavior")
 
     if scenario == "two_clusters":
         comparison_cases = [
@@ -771,6 +814,13 @@ with tab_compare:
             ("Young + low income + new", build_probe_customer(28, 7000, 0)),
             ("Older + low income + new", build_probe_customer(45, 7000, 0)),
             ("Older + low income + existing", build_probe_customer(45, 7000, 1)),
+        ]
+    elif scenario == "messy_real_world":
+        comparison_cases = [
+            ("Age 22 + 14.5k + new", build_probe_customer(22, 14500, 0)),
+            ("Age 34 + 14.5k + new", build_probe_customer(34, 14500, 0)),
+            ("Age 22 + 12.5k + new", build_probe_customer(22, 12500, 0)),
+            ("Age 34 + 12.5k + new", build_probe_customer(34, 12500, 0)),
         ]
     else:
         comparison_cases = [
@@ -796,6 +846,85 @@ with tab_compare:
     show_table(
         comparison_frame,
     )
+
+    if metric_table is not None:
+        st.subheader("Generalization on unseen data")
+        show_table(
+            metric_table.assign(
+                **{
+                    "Train log loss": lambda frame: frame["Train log loss"].round(3),
+                    "Holdout log loss": lambda frame: frame["Holdout log loss"].round(3),
+                    "Train Brier": lambda frame: frame["Train Brier"].round(3),
+                    "Holdout Brier": lambda frame: frame["Holdout Brier"].round(3),
+                    "Train AUC": lambda frame: frame["Train AUC"].round(3),
+                    "Holdout AUC": lambda frame: frame["Holdout AUC"].round(3),
+                    "Train accuracy": lambda frame: frame["Train accuracy"].round(3),
+                    "Holdout accuracy": lambda frame: frame["Holdout accuracy"].round(3),
+                }
+            ),
+            column_config={
+                "Train log loss": st.column_config.NumberColumn(
+                    "Train log loss", format="%.3f"
+                ),
+                "Holdout log loss": st.column_config.NumberColumn(
+                    "Holdout log loss", format="%.3f"
+                ),
+                "Train Brier": st.column_config.NumberColumn(
+                    "Train Brier", format="%.3f"
+                ),
+                "Holdout Brier": st.column_config.NumberColumn(
+                    "Holdout Brier", format="%.3f"
+                ),
+                "Train AUC": st.column_config.NumberColumn(
+                    "Train AUC", format="%.3f"
+                ),
+                "Holdout AUC": st.column_config.NumberColumn(
+                    "Holdout AUC", format="%.3f"
+                ),
+                "Train accuracy": st.column_config.NumberColumn(
+                    "Train accuracy", format="%.3f"
+                ),
+                "Holdout accuracy": st.column_config.NumberColumn(
+                    "Holdout accuracy", format="%.3f"
+                ),
+            },
+        )
+
+        nb_holdout_log_loss = float(
+            metric_table.loc[
+                metric_table["Model"] == "Naive Bayes", "Holdout log loss"
+            ].iloc[0]
+        )
+        gb_holdout_log_loss = float(
+            metric_table.loc[
+                metric_table["Model"] == "Gradient boosting", "Holdout log loss"
+            ].iloc[0]
+        )
+        nb_holdout_auc = float(
+            metric_table.loc[
+                metric_table["Model"] == "Naive Bayes", "Holdout AUC"
+            ].iloc[0]
+        )
+        gb_holdout_auc = float(
+            metric_table.loc[
+                metric_table["Model"] == "Gradient boosting", "Holdout AUC"
+            ].iloc[0]
+        )
+        st.caption(
+            "For this scenario, `AUC` is the clearest comparison because it reflects how well the models rank unseen customers when the target has overlapping regions and local exceptions."
+        )
+        if gb_holdout_auc > nb_holdout_auc + 0.01:
+            st.success(
+                "On the holdout set, gradient boosting ranks customers better here. That is the main lesson of this scenario: GB can carve out local regions and exceptions that Naive Bayes has to average inside broad bins."
+            )
+            if gb_holdout_log_loss >= nb_holdout_log_loss:
+                st.caption(
+                    "Naive Bayes can still look competitive on calibration-style metrics in this simplified demo because its probabilities are more conservative. The stronger GB advantage here is structural and ranking-based."
+                )
+        else:
+            st.warning(
+                "This scenario still makes the structural difference visible, but the holdout ranking advantage is not large enough yet to make a strong claim."
+            )
 
     delta_left, delta_right = st.columns(2, gap="large")
     if scenario == "two_clusters":
@@ -831,6 +960,35 @@ with tab_compare:
             st.caption(
                 "Gradient boosting can use one tree for the first region and another tree for the leftover existing-customer region."
             )
+    elif scenario == "messy_real_world":
+        nb_very_young_high_income = score_naive_bayes(
+            nb_model, build_probe_customer(22, 14500, 0)
+        )["probability"]
+        gb_very_young_high_income = score_gradient_boosting(
+            gb_model, build_probe_customer(22, 14500, 0)
+        )["probability"]
+
+        nb_late_under35_high_income = score_naive_bayes(
+            nb_model, build_probe_customer(34, 14500, 0)
+        )["probability"]
+        gb_late_under35_high_income = score_gradient_boosting(
+            gb_model, build_probe_customer(34, 14500, 0)
+        )["probability"]
+
+        with delta_left:
+            st.subheader("Naive Bayes on same broad bins")
+            st.metric("Age 22 + 14.5k + new", f"{nb_very_young_high_income:.1%}")
+            st.metric("Age 34 + 14.5k + new", f"{nb_late_under35_high_income:.1%}")
+            st.caption(
+                "NB keeps these customers almost identical because both are still in the same broad `Under 35` and `13k+` bins. It cannot draw an extra age threshold inside that bin."
+            )
+        with delta_right:
+            st.subheader("Gradient boosting on local pockets")
+            st.metric("Age 22 + 14.5k + new", f"{gb_very_young_high_income:.1%}")
+            st.metric("Age 34 + 14.5k + new", f"{gb_late_under35_high_income:.1%}")
+            st.caption(
+                "GB separates them because the trees can insert extra thresholds inside the broad NB bin. That is the key real-world advantage this scenario is meant to show."
+            )
     else:
         nb_young_delta = score_naive_bayes(nb_model, build_probe_customer(28, 14000, 0))[
                              "probability"
@@ -865,9 +1023,14 @@ with tab_compare:
                 "Those movements differ because income matters inside a learned branch."
             )
 
-    st.warning(
-        "If you added a third feature that was almost a copy of age, Naive Bayes algorithm would still count it as separate evidence by design (though Pega ADM will detect correlation and rule out correlated feature). A tree model can treat such a feature as redundant and simply not split on it if it adds no gain.",
-    )
+    if scenario == "messy_real_world":
+        st.warning(
+            "This is the strongest case for GB in the current demo: same features, same setup, but a messier target. NB must summarize each broad bin with one contribution, while GB can keep splitting to represent pockets, exceptions, and interaction structure."
+        )
+    else:
+        st.warning(
+            "If you added a third feature that was almost a copy of age, Naive Bayes algorithm would still count it as separate evidence by design (though Pega ADM will detect correlation and rule out correlated feature). A tree model can treat such a feature as redundant and simply not split on it if it adds no gain.",
+        )
 with tab_wiki:
     with open(os.path.join(os.path.dirname(__file__), "docs/DEMO_WIKI.md"), "r") as f:
         readme_line = f.readlines()

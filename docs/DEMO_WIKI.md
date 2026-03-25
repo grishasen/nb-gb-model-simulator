@@ -6,12 +6,14 @@ It covers both teaching scenarios:
 
 - `Single Positive Region`
 - `Two Positive Regions`
+- `Messy Real-World Pattern`
 
 The goal is to make it easy to explain:
 
 - what Naive Bayes is doing
 - what gradient boosting is doing
 - why those behaviors differ
+- why GB often has an advantage once the data gets noisy and locally irregular
 
 ## App Structure
 
@@ -28,6 +30,11 @@ Use the sidebar to control:
 - probe customer age
 - probe customer income
 - whether the probe customer is an existing customer
+
+The `Compare` tab now has two roles:
+
+- in the first two scenarios, it highlights score differences on hand-picked probe customers
+- in the third scenario, it also shows train-versus-holdout quality metrics
 
 ## What Changed In The Current Version
 
@@ -70,6 +77,73 @@ Important caveat:
 
 - the GB training-side split search is still intentionally simplified for education
 - the scoring explanation is now closer to the Pega mental model than the training algorithm itself
+
+## Scenario 3: Messy Real-World Pattern
+
+### Hidden Pattern
+
+This is not a perfect rule-based dataset.
+
+Instead, the probability of acceptance is higher in some regions and lower in others:
+
+- higher for very young customers with sufficiently high income
+- higher for some existing customers with lower income
+- lower in a few local exception pockets
+
+This scenario also includes:
+
+- overlap between accepted and rejected outcomes
+- train and holdout datasets
+- broad bins that hide finer thresholds from Naive Bayes
+
+### Why This Scenario Exists
+
+The first two scenarios teach structure.
+
+This third scenario teaches generalization:
+
+- NB still uses the same broad bins and independent contributions
+- GB can insert extra thresholds inside those broad bins
+- a holdout set lets you show that this matters on unseen data, not just on one probe customer
+
+### Recommended Live Walkthrough
+
+1. Select `Messy Real-World Pattern`.
+2. Open `Story`.
+3. Explain that the shaded regions are now only higher-propensity regions, not deterministic rules.
+4. Point out that there is a `Training Data` section and a `Holdout dataset` section.
+5. Open `Compare`.
+6. Start with the score table and call out these two pairs:
+   - `Age 22 + 14.5k + new`
+   - `Age 34 + 14.5k + new`
+   - `Age 22 + 12.5k + new`
+   - `Age 34 + 12.5k + new`
+7. Explain the key point:
+   - NB gives each pair the same score because both customers fall into the same broad age and income bins
+   - GB separates them because it can place extra age thresholds inside those bins
+8. Stay in `Compare` and show the `Generalization on unseen data` table.
+9. Emphasize that `Holdout AUC` is the main metric to watch here.
+10. Explain that the simplified GB demo is strongest on ranking unseen customers correctly, even if NB can still look competitive on conservative calibration-style metrics.
+11. Open `Gradient Boosting`.
+12. Show the tree paths and say:
+   - “These extra thresholds are exactly what let GB pull apart customers who looked identical to Naive Bayes.”
+13. Open `Naive Bayes`.
+14. Show that NB still has one contribution per broad bin and cannot create those finer pockets inside a bin.
+
+### What To Say
+
+- “Real data is rarely a perfect rectangle.”
+- “Naive Bayes has to summarize each broad band with one contribution.”
+- “Gradient boosting can keep splitting inside that band and create local pockets.”
+- “That is why GB often wins once the data has overlap, exceptions, and hidden finer thresholds.”
+
+### Expected Takeaway
+
+This scenario is best for explaining:
+
+- why GB often ranks real customers better on messy data
+- why independent bin contributions can be too coarse
+- why a holdout set matters when comparing models
 
 ## Scenario 1: Single Positive Region
 
@@ -225,6 +299,13 @@ These probes work well during a live demo.
 - `45, 7000, new`
 - `45, 7000, existing`
 
+### Messy Real-World Pattern
+
+- `22, 14500, new`
+- `34, 14500, new`
+- `22, 12500, new`
+- `34, 12500, new`
+
 ## Fast Explanation Script
 
 If you only have two to three minutes:
@@ -234,9 +315,10 @@ If you only have two to three minutes:
    - “NB adds one contribution per predictor, averages those contributions into a final score, then maps that score to propensity through a classifier table.”
 3. In `Gradient Boosting`, say:
    - “GB starts from a bias score, takes one score from each visited tree, and turns the final score into probability.”
-4. Switch to `Two Positive Regions`.
-5. Show that a later GB tree can pivot to another rule pattern, including `Existing customer`.
-6. Close with:
+4. Switch to `Messy Real-World Pattern`.
+5. Show that two customers in the same NB bins can get different GB scores.
+6. Point to the holdout `AUC` comparison.
+7. Close with:
    - Naive Bayes: “sum of independent evidence, then classifier mapping”
    - Gradient boosting: “sum of rule-based tree scores”
 
@@ -244,7 +326,9 @@ If you only have two to three minutes:
 
 - Use `Single Positive Region` first because it is easier to understand.
 - Use `Two Positive Regions` second because it answers the natural question: “Why do we need another tree at all?”
+- Use `Messy Real-World Pattern` third because it shows why the structural difference matters on holdout data.
 - If the audience is non-technical, spend more time on the `Compare` tab and the contribution charts than on the root-candidate tables.
 - If the audience is technical, use the NB `Classifier table`, the NB `z-ratio` fields, the GB `Pega-style per-tree contribution view`, and the per-tree scoring trace.
+- In the third scenario, emphasize `Holdout AUC` before `log loss`, because the simplified GB demo is most convincing there as a ranking model.
 - In the NB tab, avoid saying “sigmoid” because the current explanation is classifier-table based.
 - In the GB tab, avoid saying “leaf value times learning rate” because the current explanation is tree-score based.
