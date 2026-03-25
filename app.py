@@ -175,7 +175,19 @@ GB_DEFAULTS = {
     "two_clusters": {"trees": 2, "depth": 2, "learning_rate": 0.9},
     "messy_real_world": {"trees": 6, "depth": 3, "learning_rate": 0.35},
 }
-
+st.markdown(
+    """
+<style>
+    .stMainBlockContainer {
+        padding-left: 2rem;
+        padding-right: 1rem;
+        padding-top: 0rem;
+        padding-bottom: 1rem;
+    }
+</style>
+    """,
+    unsafe_allow_html=True
+)
 
 st.sidebar.header("Scenario")
 scenario = st.sidebar.selectbox(
