@@ -65,10 +65,11 @@ def create_nb_contribution_figure(
                 y=chart_frame["Feature"],
                 orientation="h",
                 marker_color=chart_frame["Color"],
-                customdata=chart_frame[["Selected value"]],
+                customdata=chart_frame[["Selected value", "Bin z-ratio"]],
                 hovertemplate=(
                     "Feature=%{y}<br>"
                     "Selected value=%{customdata[0]}<br>"
+                    "Bin z-ratio=%{customdata[1]:.3f}<br>"
                     "Contribution=%{x:.3f}<extra></extra>"
                 ),
             )
@@ -94,42 +95,72 @@ def create_nb_contribution_figure(
 def create_gb_round_figure(
         base_score: float,
         round_frame: pd.DataFrame,
-        final_raw_score: float,
 ) -> go.Figure:
-    x_values = [
-        f"Round {int(round_id)}"
-        for round_id in round_frame["Round"].tolist()
-    ]
-    y_values = round_frame["Contribution"].tolist()
-
-    customdata = (
-        [
-            [row["Leaf note"], row["Path"]]
-            for _, row in round_frame.iterrows()
-        ]
+    chart_frame = round_frame.copy()
+    chart_frame["Color"] = chart_frame["Tree score"].apply(
+        lambda value: "#0e6b62" if value >= 0 else "#b86839"
     )
+    customdata = chart_frame[["Leaf note", "Path", "Propensity after tree"]]
 
-    fig = go.Figure(
-        go.Waterfall(
-            x=x_values,
-            y=y_values,
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=chart_frame["Tree"],
+            y=chart_frame["Tree score"],
+            marker_color=chart_frame["Color"],
+            name="Tree score",
             customdata=customdata,
-            connector={"line": {"color": "#94a3b8"}},
-            increasing={"marker": {"color": "#0e6b62"}},
-            decreasing={"marker": {"color": "#b86839"}},
-            totals={"marker": {"color": "#1d4ed8"}},
             hovertemplate=(
                 "%{x}<br>"
-                "Amount=%{y:.3f}<br>"
-                "Note=%{customdata[0]}<br>"
+                "Tree score=%{y:.3f}<br>"
+                "Scoring node=%{customdata[0]}<br>"
                 "Path=%{customdata[1]}<extra></extra>"
             ),
         )
     )
+    fig.add_trace(
+        go.Scatter(
+            x=chart_frame["Tree"],
+            y=chart_frame["Running mean tree score"],
+            mode="lines+markers",
+            name="Running mean tree score",
+            line=dict(color="#1d4ed8", width=3),
+            marker=dict(size=8),
+            hovertemplate="%{x}<br>Running mean=%{y:.3f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=chart_frame["Tree"],
+            y=chart_frame["Propensity after tree"],
+            mode="lines+markers",
+            name="Running propensity",
+            line=dict(color="#7c3aed", width=3, dash="dot"),
+            marker=dict(size=8),
+            yaxis="y2",
+            hovertemplate="%{x}<br>Running propensity=%{y:.1%}<extra></extra>",
+        )
+    )
+    fig.add_hline(y=0, line_width=1, line_color="#94a3b8")
     fig.update_layout(
-        height=340,
+        height=480,
         margin=dict(l=10, r=10, t=10, b=10),
-        showlegend=False,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        yaxis=dict(title="Tree score"),
+        yaxis2=dict(
+            title="Propensity",
+            overlaying="y",
+            side="right",
+            tickformat=".0%",
+            range=[0, 1],
+        ),
+        title=dict(
+            text=f"Bias score before learned trees: {base_score:+.3f}",
+            x=0.06,
+            y=0.92,
+            xanchor="left",
+            font=dict(size=12),
+        ),
     )
     return fig
 
@@ -166,17 +197,19 @@ gb_result = score_gradient_boosting(gb_model, probe)
 rule_regions = build_rule_regions(scenario)
 
 st.title("Naive Bayes vs Gradient Boosting")
-st.write(
-    "This demo uses a tiny synthetic classification problem so we can watch each model learn. "
-    "Naive Bayes adds independent feature evidence, while gradient boosting grows split rules that "
-    "can make one feature matter only inside another feature's branch."
-)
-st.info(
+st.markdown(
+            """
+            - `Naive Bayes` does not create combined rules. It scores each feature independently and adds the evidence.
+            - `Gradient boosting` can create paths such as `age < 35` then `income > 10000`.
+            - The same change in income can have a fixed effect in NB but a branch-specific effect in GB.
+            """
+        )
+st.success(
     SCENARIO_DESCRIPTIONS[scenario]
 )
 
 tab_story, tab_nb, tab_gb, tab_compare = st.tabs(
-    ["Story", "Naive Bayes", "Gradient Boosting", "Compare"]
+    [":material/database_search: Story", ":material/star_shine: Naive Bayes", ":material/light_mode: Gradient Boosting", ":material/wand_stars: Compare"]
 )
 
 with tab_story:
@@ -251,14 +284,6 @@ with tab_story:
         st.caption("The shaded block is the hidden rule that generated positive outcomes.")
 
     with right:
-        st.subheader("What this demo is trying to teach")
-        st.markdown(
-            """
-            - `Naive Bayes` does not create combined rules. It scores each feature independently and adds the evidence.
-            - `Gradient boosting` can create paths such as `age < 35` then `income > 10000`.
-            - The same change in income can have a fixed effect in NB but a branch-specific effect in GB.
-            """
-        )
         st.subheader("Current hidden rule")
         if scenario == "two_clusters":
             st.markdown(
@@ -297,47 +322,58 @@ with tab_story:
         )
 
 with tab_nb:
-    st.header("Naive Bayes")
-    st.subheader("Independent evidence from each feature")
-    st.info(
-        "Each feature contributes its own log-odds evidence. Age does not change the income contribution and income does not change the age contribution.",
+    st.subheader("Naive Bayes: Independent evidence from each feature")
+    st.success(
+        "Example follows the Pega ADM-style: each feature adds a modified log-odds contribution, the model averages those contributions into a final score, and a classifier table maps that score to the returned propensity.",
     )
 
     metric_columns = st.columns(3, gap="medium")
     with metric_columns[0]:
-        st.metric("Prior log-odds", f"{nb_result['prior_log_odds']:+.3f}")
+        st.metric("Base log-odds term", f"{nb_result['base_log_odds']:+.3f}")
     with metric_columns[1]:
-        st.metric("Final raw score", f"{nb_result['raw_score']:+.3f}")
+        st.metric("Final ADM score", f"{nb_result['raw_score']:+.3f}")
     with metric_columns[2]:
-        st.metric("Illustrative probability", f"{nb_result['probability']:.1%}")
+        st.metric("Returned propensity", f"{nb_result['probability']:.1%}")
 
     nb_left, nb_right = st.columns(2, gap="large")
     with nb_left:
-        st.subheader("How the prior is calculated")
+        st.subheader("How the base term is calculated")
         st.write(
-            "Naive Bayes starts from the overall positive-vs-negative balance, with a small smoothing term."
+            "Pega's NB score starts from the overall accepted-versus-rejected balance. The total denominator cancels out, so the base term can be written directly from counts."
         )
         st.latex(
-            rf"\text{{prior}} = \log\left(\frac{{{nb_model.positives}+0.5}}{{{nb_model.negatives}+0.5}}\right) = {nb_result['prior_log_odds']:+.3f}"
+            rf"\text{{base term}} = \log(1 + {nb_model.positives}) - \log(1 + {nb_model.negatives}) = {nb_result['base_log_odds']:+.3f}"
+        )
+        st.latex(
+            r"\text{contribution}_p = \log\left(Pos_i + \frac{1}{nBins}\right) - \log\left(Neg_i + \frac{1}{nBins}\right) - \log(1 + TotalPos) + \log(1 + TotalNeg)"
         )
         st.caption(
-            "Each feature contribution is computed as log(smoothed P(bin|accepted)) - log(smoothed P(bin|rejected))."
+            "Each bin also gets a z-ratio, which measures how different its accepted-share and rejected-share are relative to sampling noise."
         )
 
     with nb_right:
         st.subheader("How this probe customer becomes a propensity")
+        st.latex(
+            r"score = \frac{\log(1 + TotalPositives) – \log(1 + TotalNegatives) + \sum_p contribution_p}{1 + nActivePredictors}"
+        )
         nb_contribution_terms = " + ".join(
-            [f"({nb_result['prior_log_odds']:+.3f})"]
+            [f"({nb_result['base_log_odds']:+.3f})"]
             + [
                 f"({value:+.3f})"
                 for value in nb_result["contributions"]["Contribution"].tolist()
             ]
         )
         st.latex(
-            rf"\text{{raw score}} = {nb_contribution_terms} = {nb_result['raw_score']:+.3f}"
+            rf"\text{{score numerator}} = {nb_contribution_terms} = {nb_result['score_numerator']:+.3f}"
         )
         st.latex(
-            rf"\text{{propensity}} = \sigma(\text{{raw score}}) = \frac{{1}}{{1 + e^{{-({nb_result['raw_score']:+.3f})}}}} = {nb_result['probability']:.3f}"
+            rf"\text{{score}} = \frac{{{nb_result['score_numerator']:+.3f}}}{{1 + {nb_model.active_predictor_count}}} = {nb_result['raw_score']:+.3f}"
+        )
+        st.latex(
+            rf"\text{{returned propensity}} = \frac{{0.5 + {nb_result['classifier_positives']}}}{{1 + {nb_result['classifier_positives']} + {nb_result['classifier_negatives']}}} = {nb_result['probability']:.3f}"
+        )
+        st.caption(
+            f"Probe score falls into classifier bin `{nb_result['classifier_bin']}` with classifier z-ratio {nb_result['classifier_z_ratio']:+.3f}."
         )
 
     st.subheader("Contribution chart")
@@ -355,7 +391,7 @@ with tab_nb:
     )
     st.caption(
         f"Axis fixed for this scenario: {-nb_contribution_limit:.3f} to {nb_contribution_limit:.3f}. "
-        "This chart shows only the currently selected feature contributions."
+        "This chart shows only the currently selected modified log-odds contributions."
     )
 
     left, right = st.columns(2, gap="large")
@@ -363,19 +399,20 @@ with tab_nb:
         st.subheader("Score breakdown for the probe customer")
         show_table(
             nb_result["contributions"].assign(
-                Contribution=lambda frame: frame["Contribution"].round(3),
                 **{
+                    "Contribution": lambda frame: frame["Contribution"].round(3),
                     "Smoothed P(bin|accepted)": lambda frame: frame[
                         "Smoothed P(bin|accepted)"
                     ].round(3),
                     "Smoothed P(bin|rejected)": lambda frame: frame[
                         "Smoothed P(bin|rejected)"
                     ].round(3),
-                    "Raw score after feature": lambda frame: frame[
-                        "Raw score after feature"
+                    "Bin z-ratio": lambda frame: frame["Bin z-ratio"].round(3),
+                    "Running numerator": lambda frame: frame[
+                        "Running numerator"
                     ].round(3),
-                    "Propensity after feature": lambda frame: frame[
-                        "Propensity after feature"
+                    "Score after feature": lambda frame: frame[
+                        "Score after feature"
                     ].round(3),
                 }
             ),
@@ -386,14 +423,17 @@ with tab_nb:
                 "Smoothed P(bin|rejected)": st.column_config.NumberColumn(
                     "Smoothed P(bin|rejected)", format="%.3f"
                 ),
+                "Bin z-ratio": st.column_config.NumberColumn(
+                    "Bin z-ratio", format="%.3f"
+                ),
                 "Contribution": st.column_config.NumberColumn(
                     "Contribution", format="%.3f"
                 ),
-                "Raw score after feature": st.column_config.NumberColumn(
-                    "Raw score after feature", format="%.3f"
+                "Running numerator": st.column_config.NumberColumn(
+                    "Running numerator", format="%.3f"
                 ),
-                "Propensity after feature": st.column_config.NumberColumn(
-                    "Propensity after feature", format="%.3f"
+                "Score after feature": st.column_config.NumberColumn(
+                    "Score after feature", format="%.3f"
                 ),
                 "Positives in bin": st.column_config.NumberColumn(
                     "Positives in bin", format="%d"
@@ -406,59 +446,122 @@ with tab_nb:
 
     with right:
         st.subheader("What the model learned from bins")
-        age_table, income_table, existing_table = st.tabs(
-            ["Age band table", "Income band table", "Existing customer table"]
+        st.latex(
+            r"\text{bin z-ratio} = \frac{p_{acc} - p_{rej}}{\sqrt{\frac{p_{acc}(1-p_{acc})}{TotalAccepted} + \frac{p_{rej}(1-p_{rej})}{TotalRejected}}}"
         )
+        age_table, income_table, existing_table, classifier_table = st.tabs(
+            [
+                "Age band table",
+                "Income band table",
+                "Existing customer table",
+                "Classifier table",
+            ]
+        )
+        feature_table_config = {
+            "Responses": st.column_config.NumberColumn("Responses", format="%d"),
+            "Responses %": st.column_config.NumberColumn("Responses %", format="%.3f"),
+            "Positives": st.column_config.NumberColumn("Positives", format="%d"),
+            "Negatives": st.column_config.NumberColumn("Negatives", format="%d"),
+            "Accepted % of total": st.column_config.NumberColumn(
+                "Accepted % of total", format="%.3f"
+            ),
+            "Rejected % of total": st.column_config.NumberColumn(
+                "Rejected % of total", format="%.3f"
+            ),
+            "Accepted % of accepted": st.column_config.NumberColumn(
+                "Accepted % of accepted", format="%.3f"
+            ),
+            "Rejected % of rejected": st.column_config.NumberColumn(
+                "Rejected % of rejected", format="%.3f"
+            ),
+            "Bin propensity": st.column_config.NumberColumn(
+                "Bin propensity", format="%.3f"
+            ),
+            "Adjusted propensity": st.column_config.NumberColumn(
+                "Adjusted propensity", format="%.3f"
+            ),
+            "Z-ratio": st.column_config.NumberColumn("Z-ratio", format="%.3f"),
+            "Contribution": st.column_config.NumberColumn(
+                "Contribution", format="%.3f"
+            ),
+        }
         with age_table:
             show_table(
                 feature_summary_table(nb_model, "age_bin"),
-                column_config={
-                    "Positives": st.column_config.NumberColumn("Positives", format="%d"),
-                    "Negatives": st.column_config.NumberColumn("Negatives", format="%d"),
-                    "Positive share": st.column_config.NumberColumn(
-                        "Positive share", format="%.3f"
-                    ),
-                    "Negative share": st.column_config.NumberColumn(
-                        "Negative share", format="%.3f"
-                    ),
-                    "Contribution": st.column_config.NumberColumn(
-                        "Contribution", format="%.3f"
-                    ),
-                },
+                column_config=feature_table_config,
             )
         with income_table:
             show_table(
                 feature_summary_table(nb_model, "income_bin"),
-                column_config={
-                    "Positives": st.column_config.NumberColumn("Positives", format="%d"),
-                    "Negatives": st.column_config.NumberColumn("Negatives", format="%d"),
-                    "Positive share": st.column_config.NumberColumn(
-                        "Positive share", format="%.3f"
-                    ),
-                    "Negative share": st.column_config.NumberColumn(
-                        "Negative share", format="%.3f"
-                    ),
-                    "Contribution": st.column_config.NumberColumn(
-                        "Contribution", format="%.3f"
-                    ),
-                },
+                column_config=feature_table_config,
             )
         with existing_table:
             show_table(
                 feature_summary_table(nb_model, "existing_status"),
+                column_config=feature_table_config,
+            )
+        with classifier_table:
+            classifier_display = nb_model.classifier_table.copy()
+            classifier_display["Selected"] = classifier_display["Bin"].eq(
+                nb_result["classifier_bin"]
+            )
+            show_table(
+                classifier_display[
+                    [
+                        "Selected",
+                        "Bin",
+                        "Positives",
+                        "Negatives",
+                        "Responses %",
+                        "Cum. total %",
+                        "Propensity",
+                        "Adjusted propensity",
+                        "Cum. positives %",
+                        "Z-ratio",
+                        "Lift",
+                    ]
+                ].assign(
+                    **{
+                        "Responses %": lambda frame: frame["Responses %"].round(3),
+                        "Cum. total %": lambda frame: frame["Cum. total %"].round(3),
+                        "Propensity": lambda frame: frame["Propensity"].round(3),
+                        "Adjusted propensity": lambda frame: frame[
+                            "Adjusted propensity"
+                        ].round(3),
+                        "Cum. positives %": lambda frame: frame[
+                            "Cum. positives %"
+                        ].round(3),
+                        "Z-ratio": lambda frame: frame["Z-ratio"].round(3),
+                        "Lift": lambda frame: frame["Lift"].round(3),
+                    }
+                ),
                 column_config={
+                    "Selected": st.column_config.CheckboxColumn("Selected"),
                     "Positives": st.column_config.NumberColumn("Positives", format="%d"),
                     "Negatives": st.column_config.NumberColumn("Negatives", format="%d"),
-                    "Positive share": st.column_config.NumberColumn(
-                        "Positive share", format="%.3f"
+                    "Responses %": st.column_config.NumberColumn(
+                        "Responses %", format="%.3f"
                     ),
-                    "Negative share": st.column_config.NumberColumn(
-                        "Negative share", format="%.3f"
+                    "Cum. total %": st.column_config.NumberColumn(
+                        "Cum. total %", format="%.3f"
                     ),
-                    "Contribution": st.column_config.NumberColumn(
-                        "Contribution", format="%.3f"
+                    "Propensity": st.column_config.NumberColumn(
+                        "Propensity", format="%.3f"
                     ),
+                    "Adjusted propensity": st.column_config.NumberColumn(
+                        "Adjusted propensity", format="%.3f"
+                    ),
+                    "Cum. positives %": st.column_config.NumberColumn(
+                        "Cum. positives %", format="%.3f"
+                    ),
+                    "Z-ratio": st.column_config.NumberColumn(
+                        "Z-ratio", format="%.3f"
+                    ),
+                    "Lift": st.column_config.NumberColumn("Lift", format="%.3f"),
                 },
+            )
+            st.caption(
+                "This simplified classifier table is built with a pool-adjacent-violators monotonic mapping so the final score is translated to propensity in the same spirit as the Pega ADM classifier."
             )
 
     if scenario == "two_clusters":
@@ -472,12 +575,10 @@ with tab_nb:
         )
 
 with tab_gb:
-    st.header("Gradient Boosting")
-    st.subheader("Conditional rules built from split paths")
-    st.info(
-        "The model starts with a base score, computes residuals, proposes candidate splits, grows a small tree, adds that tree's output, and repeats.",
+    st.subheader("Gradient Boosting: Conditional rules built from split paths")
+    st.success(
+        "This simplified view now uses a more Pega-like scoring story: start from a bias score, take one scoring node from each tree, sum those tree scores, and then convert the final score to propensity.",
     )
-    st.caption(f"This simplified ensemble uses {len(gb_model.rounds)} trees.")
     if scenario == "two_clusters":
         st.info(
             "This scenario was designed to leave behind a second strong residual pattern. Tree 1 usually explains the young-higher-income region, and tree 2 often pivots to `Existing customer` to pick up the lower-income existing-customer region."
@@ -490,7 +591,7 @@ with tab_gb:
 
     metric_columns = st.columns(3, gap="medium")
     with metric_columns[0]:
-        st.metric("Base score", f"{gb_result['base_score']:+.3f}")
+        st.metric("Bias score", f"{gb_result['base_score']:+.3f}")
     with metric_columns[1]:
         st.metric("Final raw score", f"{gb_result['raw_score']:+.3f}")
     with metric_columns[2]:
@@ -500,15 +601,15 @@ with tab_gb:
     positive_count = int(training_data["accepted"].sum())
     total_count = len(training_data)
     with base_left:
-        st.subheader("How the base score is calculated")
+        st.subheader("How the bias score is calculated")
         st.write(
-            "The model starts from the overall positive rate before any trees are added."
+            "Before any learned trees fire, the model starts from the overall population balance."
         )
         st.latex(
-            rf"\text{{base rate}} = \frac{{{positive_count}}}{{{total_count}}} = {gb_model.base_rate:.3f}"
+            rf"\text{{accepted rate}} = \frac{{{positive_count}}}{{{total_count}}} = {gb_model.base_rate:.3f}"
         )
         st.latex(
-            rf"\text{{base score}} = \log\left(\frac{{{gb_model.base_rate:.3f}}}{{1-{gb_model.base_rate:.3f}}}\right) = {gb_model.base_score:+.3f}"
+            rf"\text{{bias score}} = \log\left(\frac{{{gb_model.base_rate:.3f}}}{{1-{gb_model.base_rate:.3f}}}\right) = {gb_model.base_score:+.3f}"
         )
     with base_right:
         st.subheader("How this probe customer becomes a propensity")
@@ -516,55 +617,58 @@ with tab_gb:
             [f"({gb_model.base_score:+.3f})"]
             + [
                 f"({value:+.3f})"
-                for value in gb_result["rounds"]["Contribution"].tolist()
+                for value in gb_result["rounds"]["Tree score"].tolist()
             ]
         )
         st.latex(
-            rf"\text{{raw score}} = {contribution_terms} = {gb_result['raw_score']:+.3f}"
+            rf"\text{{final score}} = {contribution_terms} = {gb_result['raw_score']:+.3f}"
         )
         st.latex(
-            rf"\text{{propensity}} = \sigma(\text{{raw score}}) = \frac{{1}}{{1 + e^{{-({gb_result['raw_score']:+.3f})}}}} = {gb_result['probability']:.3f}"
+            rf"\text{{propensity}} = \sigma(\text{{final score}}) = \frac{{1}}{{1 + e^{{-({gb_result['raw_score']:+.3f})}}}} = {gb_result['probability']:.3f}"
         )
 
-    st.subheader("Round contribution chart")
+    st.subheader("Pega-style per-tree contribution view")
     gb_round_figure = create_gb_round_figure(
         gb_result["base_score"],
         gb_result["rounds"],
-        gb_result["raw_score"],
     )
     st.plotly_chart(
         gb_round_figure,
         width='stretch',
-        key=f"gb_round_chart_{scenario}_{probe.age}_{probe.income}_{probe.existing_customer}",
+        key=f"gb_round_chart_{scenario}_{probe.age}_{probe.income}_{probe.existing_customer}"
     )
     st.caption(
-        "This chart shows how the base score is adjusted by each new tree until the final raw score is reached."
+        "Bars show the score contributed by the visited node in each tree. The blue line tracks the running mean tree score, and the dotted line shows the running propensity after adding each tree to the bias score."
     )
 
-    st.subheader("Score contributions by round")
+    st.subheader("Tree-by-tree scoring trace")
     show_table(
         gb_result["rounds"].assign(
             **{
-                "Leaf value": lambda frame: frame["Leaf value"].round(3),
-                "Contribution": lambda frame: frame["Contribution"].round(3),
-                "Raw score after round": lambda frame: frame[
-                    "Raw score after round"
+                "Tree score": lambda frame: frame["Tree score"].round(3),
+                "Running mean tree score": lambda frame: frame[
+                    "Running mean tree score"
                 ].round(3),
-                "Propensity after round": lambda frame: frame[
-                    "Propensity after round"
+                "Raw score after tree": lambda frame: frame[
+                    "Raw score after tree"
+                ].round(3),
+                "Propensity after tree": lambda frame: frame[
+                    "Propensity after tree"
                 ].round(3),
             }
         ),
         column_config={
-            "Leaf value": st.column_config.NumberColumn("Leaf value", format="%.3f"),
-            "Contribution": st.column_config.NumberColumn(
-                "Contribution", format="%.3f"
+            "Tree score": st.column_config.NumberColumn(
+                "Tree score", format="%.3f"
             ),
-            "Raw score after round": st.column_config.NumberColumn(
-                "Raw score after round", format="%.3f"
+            "Running mean tree score": st.column_config.NumberColumn(
+                "Running mean tree score", format="%.3f"
             ),
-            "Propensity after round": st.column_config.NumberColumn(
-                "Propensity after round", format="%.3f"
+            "Raw score after tree": st.column_config.NumberColumn(
+                "Raw score after tree", format="%.3f"
+            ),
+            "Propensity after tree": st.column_config.NumberColumn(
+                "Propensity after tree", format="%.3f"
             ),
         },
     )
@@ -578,11 +682,12 @@ with tab_gb:
             with left:
                 st.markdown("**Top split candidates at the root**")
                 show_table(
-                    candidate_summary(round_info.tree).head(6),
+                    candidate_summary(
+                        round_info.tree,
+                        scale=round_info.learning_rate,
+                    ).head(6),
                     column_config={
-                        "Threshold": st.column_config.NumberColumn(
-                            "Threshold", format="%.1f"
-                        ),
+                        "Split": st.column_config.TextColumn("Split"),
                         "Gain": st.column_config.NumberColumn("Gain", format="%.3f"),
                         "Left count": st.column_config.NumberColumn(
                             "Left count", format="%d"
@@ -590,11 +695,11 @@ with tab_gb:
                         "Right count": st.column_config.NumberColumn(
                             "Right count", format="%d"
                         ),
-                        "Left leaf": st.column_config.NumberColumn(
-                            "Left leaf", format="%.3f"
+                        "Left score": st.column_config.NumberColumn(
+                            "Left score", format="%.3f"
                         ),
-                        "Right leaf": st.column_config.NumberColumn(
-                            "Right leaf", format="%.3f"
+                        "Right score": st.column_config.NumberColumn(
+                            "Right score", format="%.3f"
                         ),
                     },
                 )
@@ -602,7 +707,7 @@ with tab_gb:
                 snapshot = round_info.snapshot.copy()
                 snapshot["probability_before"] = snapshot["probability_before"].round(3)
                 snapshot["residual"] = snapshot["residual"].round(3)
-                snapshot["round_contribution"] = snapshot["round_contribution"].round(3)
+                snapshot["tree_score"] = snapshot["tree_score"].round(3)
                 snapshot["raw_score"] = snapshot["raw_score"].round(3)
                 snapshot = snapshot.drop(columns=["existing_customer"])
                 show_table(
@@ -624,8 +729,8 @@ with tab_gb:
                         "residual": st.column_config.NumberColumn(
                             "residual", format="%.3f"
                         ),
-                        "round_contribution": st.column_config.NumberColumn(
-                            "round_contribution", format="%.3f"
+                        "tree_score": st.column_config.NumberColumn(
+                            "tree_score", format="%.3f"
                         ),
                         "raw_score": st.column_config.NumberColumn(
                             "raw_score", format="%.3f"
@@ -643,14 +748,14 @@ with tab_gb:
                 with code_tab:
                     st.code(format_tree_as_code(round_info.tree), language="python")
                 round_row = gb_result["rounds"].loc[
-                    gb_result["rounds"]["Round"] == round_info.round_index
+                    gb_result["rounds"]["Tree"] == f"Tree {round_info.round_index}"
                     ].iloc[0]
                 st.markdown("**Probe customer path through this tree**")
                 st.write(round_row["Path"])
                 st.caption(round_row["Leaf note"])
 
     st.info(
-        "The split search should discover that age is useful first, and then inside the younger branch income becomes decisive. That is an interaction rule, not an independent add-on.",
+        "The split search should discover interaction rules such as `Age <= 35` followed by `Income > 10000`, or symbolic rules such as `Existing customer in {Existing}`. That is exactly the kind of conditional logic Naive Bayes does not create.",
     )
 
 with tab_compare:
@@ -758,5 +863,5 @@ with tab_compare:
             )
 
     st.warning(
-        "If you added a third feature that was almost a copy of age, Naive Bayes would still count it as separate evidence by design. A tree model can treat such a feature as redundant and simply not split on it if it adds no gain.",
+        "If you added a third feature that was almost a copy of age, Naive Bayes algorithm would still count it as separate evidence by design (though Pega ADM will detect correlation and rule out correlated feature). A tree model can treat such a feature as redundant and simply not split on it if it adds no gain.",
     )
