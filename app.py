@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -198,18 +200,19 @@ rule_regions = build_rule_regions(scenario)
 
 st.title("Naive Bayes vs Gradient Boosting")
 st.markdown(
-            """
-            - `Naive Bayes` does not create combined rules. It scores each feature independently and adds the evidence.
-            - `Gradient boosting` can create paths such as `age < 35` then `income > 10000`.
-            - The same change in income can have a fixed effect in NB but a branch-specific effect in GB.
-            """
-        )
+    """
+    - `Naive Bayes` does not create combined rules. It scores each feature independently and adds the evidence.
+    - `Gradient boosting` can create paths such as `age < 35` then `income > 10000`.
+    - The same change in income can have a fixed effect in NB but a branch-specific effect in GB.
+    """
+)
 st.success(
     SCENARIO_DESCRIPTIONS[scenario]
 )
 
-tab_story, tab_nb, tab_gb, tab_compare = st.tabs(
-    [":material/database_search: Story", ":material/star_shine: Naive Bayes", ":material/light_mode: Gradient Boosting", ":material/wand_stars: Compare"]
+tab_story, tab_nb, tab_gb, tab_compare, tab_wiki = st.tabs(
+    [":material/database_search: Story", ":material/star_shine: Naive Bayes", ":material/light_mode: Gradient Boosting",
+     ":material/wand_stars: Compare", ":material/description: Wiki"]
 )
 
 with tab_story:
@@ -797,11 +800,11 @@ with tab_compare:
     delta_left, delta_right = st.columns(2, gap="large")
     if scenario == "two_clusters":
         nb_income_delta = score_naive_bayes(nb_model, build_probe_customer(28, 14000, 0))[
-            "probability"
-        ] - score_naive_bayes(nb_model, build_probe_customer(28, 7000, 0))["probability"]
+                              "probability"
+                          ] - score_naive_bayes(nb_model, build_probe_customer(28, 7000, 0))["probability"]
         nb_existing_delta = score_naive_bayes(nb_model, build_probe_customer(45, 7000, 1))[
-            "probability"
-        ] - score_naive_bayes(nb_model, build_probe_customer(45, 7000, 0))["probability"]
+                                "probability"
+                            ] - score_naive_bayes(nb_model, build_probe_customer(45, 7000, 0))["probability"]
 
         gb_income_delta = score_gradient_boosting(
             gb_model, build_probe_customer(28, 14000, 0)
@@ -830,11 +833,11 @@ with tab_compare:
             )
     else:
         nb_young_delta = score_naive_bayes(nb_model, build_probe_customer(28, 14000, 0))[
-            "probability"
-        ] - score_naive_bayes(nb_model, build_probe_customer(28, 9000, 0))["probability"]
+                             "probability"
+                         ] - score_naive_bayes(nb_model, build_probe_customer(28, 9000, 0))["probability"]
         nb_older_delta = score_naive_bayes(nb_model, build_probe_customer(45, 14000, 0))[
-            "probability"
-        ] - score_naive_bayes(nb_model, build_probe_customer(45, 9000, 0))["probability"]
+                             "probability"
+                         ] - score_naive_bayes(nb_model, build_probe_customer(45, 9000, 0))["probability"]
 
         gb_young_delta = score_gradient_boosting(
             gb_model, build_probe_customer(28, 14000, 0)
@@ -865,3 +868,12 @@ with tab_compare:
     st.warning(
         "If you added a third feature that was almost a copy of age, Naive Bayes algorithm would still count it as separate evidence by design (though Pega ADM will detect correlation and rule out correlated feature). A tree model can treat such a feature as redundant and simply not split on it if it adds no gain.",
     )
+with tab_wiki:
+    with open(os.path.join(os.path.dirname(__file__), "docs/DEMO_WIKI.md"), "r") as f:
+        readme_line = f.readlines()
+        readme_buffer = []
+
+    for line in readme_line:
+        readme_buffer.append(line)
+
+    st.markdown("".join(readme_buffer))
