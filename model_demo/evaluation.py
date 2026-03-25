@@ -47,8 +47,8 @@ def binary_log_loss(actual: pd.Series, predicted: pd.Series) -> float:
     clipped = predicted.clip(epsilon, 1 - epsilon)
     return float(
         -(
-            actual * clipped.map(log)
-            + (1 - actual) * (1 - clipped).map(log)
+                actual * clipped.map(log)
+                + (1 - actual) * (1 - clipped).map(log)
         ).mean()
     )
 
@@ -72,7 +72,7 @@ def roc_auc(actual: pd.Series, predicted: pd.Series) -> float:
     ranked["rank"] = ranked["predicted"].rank(method="average")
     positive_rank_sum = float(ranked.loc[ranked["actual"] == 1, "rank"].sum())
     return (
-        positive_rank_sum - (positives * (positives + 1) / 2)
+            positive_rank_sum - (positives * (positives + 1) / 2)
     ) / (positives * negatives)
 
 

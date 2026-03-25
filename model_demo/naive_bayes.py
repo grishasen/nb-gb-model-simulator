@@ -37,8 +37,8 @@ def z_ratio(
     positive_share = positive_count / total_positives
     negative_share = negative_count / total_negatives
     variance = (
-        (positive_share * (1.0 - positive_share) / total_positives)
-        + (negative_share * (1.0 - negative_share) / total_negatives)
+            (positive_share * (1.0 - positive_share) / total_positives)
+            + (negative_share * (1.0 - negative_share) / total_negatives)
     )
     if variance <= 0:
         if positive_share == negative_share:
@@ -196,7 +196,7 @@ def _match_classifier_row(classifier_table: pd.DataFrame, score: float) -> pd.Se
     matches = classifier_table.loc[
         (classifier_table["lower_bound"] <= score)
         & (score < classifier_table["upper_bound"])
-    ]
+        ]
     if matches.empty:
         return classifier_table.iloc[-1]
     return matches.iloc[0]

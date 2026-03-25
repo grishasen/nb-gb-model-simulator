@@ -62,11 +62,11 @@ def stable_fraction(
 ) -> float:
     split_offset = 11 if split == "train" else 73
     value = (
-        (age * 92821)
-        + (income * 68917)
-        + (existing_customer * 283)
-        + (split_offset * 9973)
-    ) % 2_147_483_647
+                    (age * 92821)
+                    + (income * 68917)
+                    + (existing_customer * 283)
+                    + (split_offset * 9973)
+            ) % 2_147_483_647
     value = (value * 48_271 + 12_345) % 2_147_483_647
     return value / 2_147_483_647
 

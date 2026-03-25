@@ -281,11 +281,11 @@ def predict_tree(node: TreeNode, row: pd.Series | dict[str, float]) -> float:
     assert node.feature is not None
     assert node.split_kind is not None
     if goes_left(
-        row,
-        node.feature,
-        split_kind=node.split_kind,
-        threshold=node.threshold,
-        match_values=node.match_values,
+            row,
+            node.feature,
+            split_kind=node.split_kind,
+            threshold=node.threshold,
+            match_values=node.match_values,
     ):
         return predict_tree(node.left, row)  # type: ignore[arg-type]
     return predict_tree(node.right, row)  # type: ignore[arg-type]
@@ -305,11 +305,11 @@ def trace_tree(node: TreeNode, customer: ProbeCustomer) -> tuple[list[str], floa
     value = customer_values[node.feature]
 
     if goes_left(
-        customer_values,
-        node.feature,
-        split_kind=node.split_kind,
-        threshold=node.threshold,
-        match_values=node.match_values,
+            customer_values,
+            node.feature,
+            split_kind=node.split_kind,
+            threshold=node.threshold,
+            match_values=node.match_values,
     ):
         if node.split_kind == "symbolic":
             match_text = split_rule_text(
