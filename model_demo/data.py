@@ -255,7 +255,7 @@ def build_rule_regions(scenario: str) -> pd.DataFrame:
                 "x1": 22,
                 "x2": 55,
                 "y1": 6500,
-                "y2": 9000,
+                "y2": 9500,
                 "rule_label": "Existing + lower income",
             }
         )
@@ -264,7 +264,7 @@ def build_rule_regions(scenario: str) -> pd.DataFrame:
         rows.append(
             {
                 "existing_status": "Existing customer",
-                "x1": 22,
+                "x1": 24,
                 "x2": 55,
                 "y1": 6500,
                 "y2": 9000,
