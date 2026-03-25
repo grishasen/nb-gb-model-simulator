@@ -132,6 +132,24 @@ def outcome_rule(
     return int(age < 35 and income >= 11000)
 
 
+def true_probability(
+        age: int,
+        income: int,
+        existing_customer: int,
+        scenario: str,
+) -> float:
+    if scenario == "messy_real_world":
+        return messy_acceptance_probability(age, income, existing_customer)
+    return float(
+        outcome_rule(
+            age,
+            income,
+            existing_customer,
+            scenario,
+        )
+    )
+
+
 def age_bin_for(age: float) -> str:
     if age < 35:
         return AGE_BIN_ORDER[0]

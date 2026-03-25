@@ -64,6 +64,9 @@ The GB tab now shows:
 - a `Bias score`
 - one visited `Tree score` per tree
 - a `Pega-style per-tree contribution view`
+- sidebar controls for `Trees`, `Depth`, and `Learning rate`
+- a `Raw sigmoid probability`
+- a `Calibrated probability`
 - symbolic split text for categorical logic such as `Existing customer in {Existing}`
 
 The presenter story is now:
@@ -71,12 +74,14 @@ The presenter story is now:
 - start from the bias score
 - take one score from each visited tree
 - sum those tree scores with the bias score
-- apply sigmoid to get the final propensity
+- convert the raw score to a raw sigmoid probability
+- apply a simple calibration function on top of that raw score
 
 Important caveat:
 
 - the GB training-side split search is still intentionally simplified for education
 - the scoring explanation is now closer to the Pega mental model than the training algorithm itself
+- the current version is more realistic than before because tree leaves now use logistic gradient/hessian information instead of simple mean residuals
 
 ## Scenario 3: Messy Real-World Pattern
 
@@ -123,12 +128,17 @@ This third scenario teaches generalization:
    - GB separates them because it can place extra age thresholds inside those bins
 8. Stay in `Compare` and show the `Generalization on unseen data` table.
 9. Emphasize that `Holdout AUC` is the main metric to watch here.
-10. Explain that the simplified GB demo is strongest on ranking unseen customers correctly, even if NB can still look competitive on conservative calibration-style metrics.
-11. Open `Gradient Boosting`.
-12. Show the tree paths and say:
+10. Point out that the GB sidebar defaults are stronger here:
+   - more trees
+   - slightly deeper trees
+   - lower learning rate
+11. Explain that the updated GB demo now uses logistic-style leaf scores plus a simple calibration layer, so the probabilities are more realistic than before.
+12. Open `Gradient Boosting`.
+13. Show the tree paths and say:
    - “These extra thresholds are exactly what let GB pull apart customers who looked identical to Naive Bayes.”
-13. Open `Naive Bayes`.
-14. Show that NB still has one contribution per broad bin and cannot create those finer pockets inside a bin.
+14. Point to the `Raw sigmoid probability` and `Calibrated probability` metrics and explain the difference.
+15. Open `Naive Bayes`.
+16. Show that NB still has one contribution per broad bin and cannot create those finer pockets inside a bin.
 
 ### What To Say
 
@@ -195,11 +205,13 @@ This is the cleanest scenario for teaching a one strong interaction.
 13. Point to the three headline metrics:
    - `Bias score`
    - `Final raw score`
-   - `Final probability`
+   - `Raw sigmoid probability`
+   - `Calibrated probability`
 14. Explain the formula block:
    - bias score from overall accepted rate
    - add one `Tree score` per tree
-   - apply sigmoid to get the final probability
+   - apply sigmoid to get a raw probability
+   - apply the calibration function to get the displayed probability
 15. Show the `Pega-style per-tree contribution view`.
 16. Open `Boosting round 1` and show that the first tree learns the age then income interaction.
 17. Open `Boosting round 2` and explain that it often looks similar but with a smaller correction because it is fixing what is still left over.
@@ -330,5 +342,6 @@ If you only have two to three minutes:
 - If the audience is non-technical, spend more time on the `Compare` tab and the contribution charts than on the root-candidate tables.
 - If the audience is technical, use the NB `Classifier table`, the NB `z-ratio` fields, the GB `Pega-style per-tree contribution view`, and the per-tree scoring trace.
 - In the third scenario, emphasize `Holdout AUC` before `log loss`, because the simplified GB demo is most convincing there as a ranking model.
+- In the current GB tab, explicitly mention the difference between `Raw sigmoid probability` and `Calibrated probability`.
 - In the NB tab, avoid saying “sigmoid” because the current explanation is classifier-table based.
 - In the GB tab, avoid saying “leaf value times learning rate” because the current explanation is tree-score based.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import exp, inf, log
+from math import exp, log
 
 import pandas as pd
 
@@ -47,17 +47,84 @@ class GradientBoostingModel:
     base_rate: float
     base_score: float
     rounds: list[BoostingRound]
+    calibration_slope: float
+    calibration_intercept: float
 
 
 def sigmoid(value: float) -> float:
     return 1.0 / (1.0 + exp(-value))
 
 
-def squared_error(values: pd.Series) -> float:
-    if values.empty:
-        return inf
-    mean_value = float(values.mean())
-    return float(((values - mean_value) ** 2).sum())
+def calibrated_sigmoid(
+        raw_score: float,
+        slope: float,
+        intercept: float,
+) -> float:
+    return sigmoid((slope * raw_score) + intercept)
+
+
+def logistic_leaf_value(frame: pd.DataFrame, l2_regularization: float) -> float:
+    gradient_sum = float(frame["residual"].sum())
+    hessian_sum = float(frame["hessian"].sum())
+    denominator = hessian_sum + l2_regularization
+    if denominator <= 0:
+        return 0.0
+    return gradient_sum / denominator
+
+
+def logistic_gain(frame: pd.DataFrame, l2_regularization: float) -> float:
+    gradient_sum = float(frame["residual"].sum())
+    hessian_sum = float(frame["hessian"].sum())
+    denominator = hessian_sum + l2_regularization
+    if denominator <= 0:
+        return 0.0
+    return (gradient_sum ** 2) / denominator
+
+
+def fit_platt_calibration(
+        raw_scores: pd.Series,
+        labels: pd.Series,
+        max_iterations: int = 40,
+) -> tuple[float, float]:
+    clipped_rate = min(max(float(labels.mean()), 1e-6), 1 - 1e-6)
+    slope = 1.0
+    intercept = log(clipped_rate / (1.0 - clipped_rate))
+
+    for _ in range(max_iterations):
+        calibrated_scores = (slope * raw_scores) + intercept
+        probabilities = calibrated_scores.map(sigmoid)
+        weights = probabilities * (1.0 - probabilities)
+        errors = probabilities - labels
+
+        grad_slope = float((errors * raw_scores).sum())
+        grad_intercept = float(errors.sum())
+        hess_slope_slope = float((weights * (raw_scores ** 2)).sum()) + 1e-6
+        hess_slope_intercept = float((weights * raw_scores).sum())
+        hess_intercept_intercept = float(weights.sum()) + 1e-6
+
+        determinant = (
+                hess_slope_slope * hess_intercept_intercept
+                - hess_slope_intercept * hess_slope_intercept
+        )
+        if abs(determinant) < 1e-12:
+            break
+
+        delta_slope = (
+                              hess_intercept_intercept * grad_slope
+                              - hess_slope_intercept * grad_intercept
+                      ) / determinant
+        delta_intercept = (
+                                  -hess_slope_intercept * grad_slope
+                                  + hess_slope_slope * grad_intercept
+                          ) / determinant
+
+        slope -= delta_slope
+        intercept -= delta_intercept
+
+        if max(abs(delta_slope), abs(delta_intercept)) < 1e-6:
+            break
+
+    return slope, intercept
 
 
 def candidate_thresholds(values: pd.Series) -> list[float]:
@@ -120,8 +187,9 @@ def evaluate_split_candidates(
         frame: pd.DataFrame,
         features: list[str],
         min_leaf_size: int,
+        l2_regularization: float,
 ) -> pd.DataFrame:
-    parent_error = squared_error(frame["residual"])
+    parent_gain = logistic_gain(frame, l2_regularization)
     rows = []
 
     for feature in features:
@@ -137,8 +205,11 @@ def evaluate_split_candidates(
             right = frame.loc[~left_mask]
 
             if len(left) >= min_leaf_size and len(right) >= min_leaf_size:
-                loss = squared_error(left["residual"]) + squared_error(right["residual"])
-                gain = parent_error - loss
+                gain = 0.5 * (
+                        logistic_gain(left, l2_regularization)
+                        + logistic_gain(right, l2_regularization)
+                        - parent_gain
+                )
                 rows.append(
                     {
                         "feature": feature,
@@ -153,8 +224,14 @@ def evaluate_split_candidates(
                         "gain": gain,
                         "left_count": len(left),
                         "right_count": len(right),
-                        "left_leaf_value": float(left["residual"].mean()),
-                        "right_leaf_value": float(right["residual"].mean()),
+                        "left_leaf_value": logistic_leaf_value(
+                            left,
+                            l2_regularization,
+                        ),
+                        "right_leaf_value": logistic_leaf_value(
+                            right,
+                            l2_regularization,
+                        ),
                     }
                 )
             continue
@@ -172,8 +249,11 @@ def evaluate_split_candidates(
             if len(left) < min_leaf_size or len(right) < min_leaf_size:
                 continue
 
-            loss = squared_error(left["residual"]) + squared_error(right["residual"])
-            gain = parent_error - loss
+            gain = 0.5 * (
+                    logistic_gain(left, l2_regularization)
+                    + logistic_gain(right, l2_regularization)
+                    - parent_gain
+            )
 
             rows.append(
                 {
@@ -189,8 +269,14 @@ def evaluate_split_candidates(
                     "gain": gain,
                     "left_count": len(left),
                     "right_count": len(right),
-                    "left_leaf_value": float(left["residual"].mean()),
-                    "right_leaf_value": float(right["residual"].mean()),
+                    "left_leaf_value": logistic_leaf_value(
+                        left,
+                        l2_regularization,
+                    ),
+                    "right_leaf_value": logistic_leaf_value(
+                        right,
+                        l2_regularization,
+                    ),
                 }
             )
 
@@ -218,16 +304,22 @@ def fit_tree(
         features: list[str],
         depth: int,
         min_leaf_size: int,
+        l2_regularization: float,
 ) -> TreeNode:
     node = TreeNode(
-        prediction=float(frame["residual"].mean()),
+        prediction=logistic_leaf_value(frame, l2_regularization),
         sample_count=len(frame),
     )
 
     if depth == 0 or len(frame) < min_leaf_size * 2:
         return node
 
-    candidates = evaluate_split_candidates(frame, features, min_leaf_size)
+    candidates = evaluate_split_candidates(
+        frame,
+        features,
+        min_leaf_size,
+        l2_regularization,
+    )
     node.candidates = candidates
 
     if candidates.empty or float(candidates.iloc[0]["gain"]) <= 1e-9:
@@ -262,8 +354,8 @@ def fit_tree(
     node.threshold = threshold
     node.match_values = selected_values
     node.gain = float(best["gain"])
-    node.left = fit_tree(left, features, depth - 1, min_leaf_size)
-    node.right = fit_tree(right, features, depth - 1, min_leaf_size)
+    node.left = fit_tree(left, features, depth - 1, min_leaf_size, l2_regularization)
+    node.right = fit_tree(right, features, depth - 1, min_leaf_size, l2_regularization)
     return node
 
 
@@ -463,6 +555,7 @@ def train_gradient_boosting_demo(
         learning_rate: float = 0.9,
         depth: int = 2,
         min_leaf_size: int = 4,
+        l2_regularization: float = 1.0,
 ) -> GradientBoostingModel:
     base_rate = float(frame["accepted"].mean())
     base_score = log(base_rate / (1.0 - base_rate))
@@ -474,6 +567,9 @@ def train_gradient_boosting_demo(
     for round_index in range(1, rounds + 1):
         working["probability_before"] = working["raw_score"].map(sigmoid)
         working["residual"] = working["accepted"] - working["probability_before"]
+        working["hessian"] = (
+                working["probability_before"] * (1.0 - working["probability_before"])
+        )
 
         tree = fit_tree(
             working[
@@ -484,11 +580,13 @@ def train_gradient_boosting_demo(
                     "existing_customer",
                     "accepted",
                     "residual",
+                    "hessian",
                 ]
             ].copy(),
             features=FEATURES,
             depth=depth,
             min_leaf_size=min_leaf_size,
+            l2_regularization=l2_regularization,
         )
         apply_learning_rate(tree, learning_rate)
 
@@ -505,6 +603,7 @@ def train_gradient_boosting_demo(
                 "accepted",
                 "probability_before",
                 "residual",
+                "hessian",
                 "tree_score",
                 "raw_score",
             ]
@@ -519,10 +618,17 @@ def train_gradient_boosting_demo(
             )
         )
 
+    calibration_slope, calibration_intercept = fit_platt_calibration(
+        working["raw_score"],
+        working["accepted"],
+    )
+
     return GradientBoostingModel(
         base_rate=base_rate,
         base_score=base_score,
         rounds=boosting_rounds,
+        calibration_slope=calibration_slope,
+        calibration_intercept=calibration_intercept,
     )
 
 
@@ -552,7 +658,12 @@ def score_customer(
         path, tree_score = trace_tree(round_info.tree, customer)
         raw_score += tree_score
         running_tree_scores.append(tree_score)
-        probability_after_round = sigmoid(raw_score)
+        raw_probability_after_round = sigmoid(raw_score)
+        calibrated_probability_after_round = calibrated_sigmoid(
+            raw_score,
+            model.calibration_slope,
+            model.calibration_intercept,
+        )
         round_rows.append(
             {
                 "Tree": f"Tree {round_info.round_index}",
@@ -560,15 +671,24 @@ def score_customer(
                 "Tree score": tree_score,
                 "Running mean tree score": sum(running_tree_scores) / len(running_tree_scores),
                 "Raw score after tree": raw_score,
-                "Propensity after tree": probability_after_round,
+                "Raw probability after tree": raw_probability_after_round,
+                "Calibrated propensity after tree": calibrated_probability_after_round,
                 "Leaf note": path[-1],
             }
         )
 
-    probability = sigmoid(raw_score)
+    raw_probability = sigmoid(raw_score)
+    calibrated_probability = calibrated_sigmoid(
+        raw_score,
+        model.calibration_slope,
+        model.calibration_intercept,
+    )
     return {
         "base_score": model.base_score,
         "raw_score": raw_score,
-        "probability": probability,
+        "raw_probability": raw_probability,
+        "probability": calibrated_probability,
+        "calibration_slope": model.calibration_slope,
+        "calibration_intercept": model.calibration_intercept,
         "rounds": pd.DataFrame(round_rows),
     }

@@ -12,6 +12,7 @@ from model_demo.data import (
     build_rule_regions,
     build_training_data,
     pretty_training_table,
+    true_probability,
 )
 from model_demo.evaluation import build_metric_table
 from model_demo.gradient_boosting import (
@@ -104,7 +105,7 @@ def create_gb_round_figure(
     chart_frame["Color"] = chart_frame["Tree score"].apply(
         lambda value: "#0e6b62" if value >= 0 else "#b86839"
     )
-    customdata = chart_frame[["Leaf note", "Path", "Propensity after tree"]]
+    customdata = chart_frame[["Leaf note", "Path", "Calibrated propensity after tree"]]
 
     fig = go.Figure()
     fig.add_trace(
@@ -136,13 +137,13 @@ def create_gb_round_figure(
     fig.add_trace(
         go.Scatter(
             x=chart_frame["Tree"],
-            y=chart_frame["Propensity after tree"],
+            y=chart_frame["Calibrated propensity after tree"],
             mode="lines+markers",
-            name="Running propensity",
+            name="Calibrated propensity",
             line=dict(color="#7c3aed", width=3, dash="dot"),
             marker=dict(size=8),
             yaxis="y2",
-            hovertemplate="%{x}<br>Running propensity=%{y:.1%}<extra></extra>",
+            hovertemplate="%{x}<br>Calibrated propensity=%{y:.1%}<extra></extra>",
         )
     )
     fig.add_hline(y=0, line_width=1, line_color="#94a3b8")
@@ -169,6 +170,13 @@ def create_gb_round_figure(
     return fig
 
 
+GB_DEFAULTS = {
+    "single_cluster": {"trees": 2, "depth": 2, "learning_rate": 0.9},
+    "two_clusters": {"trees": 2, "depth": 2, "learning_rate": 0.9},
+    "messy_real_world": {"trees": 6, "depth": 3, "learning_rate": 0.35},
+}
+
+
 st.sidebar.header("Scenario")
 scenario = st.sidebar.selectbox(
     "Dataset scenario",
@@ -183,12 +191,46 @@ probe_age = st.sidebar.slider("Age", min_value=22, max_value=55, value=30, step=
 probe_income = st.sidebar.slider(
     "Income", min_value=6000, max_value=16000, value=12000, step=250
 )
-probe_existing = st.sidebar.checkbox("Existing customer", value=False)
+probe_existing = st.sidebar.checkbox(
+    "Existing customer",
+    value=False,
+    key=f"probe_existing_{scenario}",
+)
+
+st.sidebar.header("Gradient Boosting Controls")
+gb_defaults = GB_DEFAULTS[scenario]
+gb_trees = st.sidebar.slider(
+    "Trees",
+    min_value=1,
+    max_value=12,
+    value=gb_defaults["trees"],
+    key=f"gb_trees_{scenario}",
+)
+gb_depth = st.sidebar.slider(
+    "Depth",
+    min_value=1,
+    max_value=4,
+    value=gb_defaults["depth"],
+    key=f"gb_depth_{scenario}",
+)
+gb_learning_rate = st.sidebar.slider(
+    "Learning rate",
+    min_value=0.1,
+    max_value=1.0,
+    value=float(gb_defaults["learning_rate"]),
+    step=0.05,
+    key=f"gb_learning_rate_{scenario}",
+)
 
 training_data = build_training_data(scenario)
 holdout_data = build_holdout_data(scenario) if scenario == "messy_real_world" else None
 nb_model = train_naive_bayes(training_data)
-gb_model = train_gradient_boosting_demo(training_data)
+gb_model = train_gradient_boosting_demo(
+    training_data,
+    rounds=gb_trees,
+    learning_rate=gb_learning_rate,
+    depth=gb_depth,
+)
 probe = build_probe_customer(probe_age, probe_income, int(probe_existing))
 metric_table = (
     build_metric_table(nb_model, gb_model, training_data, holdout_data)
@@ -617,11 +659,18 @@ with tab_nb:
 with tab_gb:
     st.subheader("Gradient Boosting: Conditional rules built from split paths")
     st.success(
-        "This simplified view now uses a more Pega-like scoring story: start from a bias score, take one scoring node from each tree, sum those tree scores, and then convert the final score to propensity.",
+        "This view now uses a more realistic GB story: fit trees from logistic gradients and hessians, sum the tree scores into a final raw score, and then calibrate that raw score into a probability.",
+    )
+    st.caption(
+        f"Current GB settings: {gb_trees} trees, depth {gb_depth}, learning rate {gb_learning_rate:.2f}."
     )
     if scenario == "two_clusters":
         st.info(
             "This scenario was designed to leave behind a second strong residual pattern. Tree 1 usually explains the young-higher-income region, and tree 2 often pivots to `Existing customer` to pick up the lower-income existing-customer region."
+        )
+    elif scenario == "messy_real_world":
+        st.info(
+            "For the messy scenario, the stronger defaults use more trees, a slightly deeper structure, and a smaller learning rate so the model can capture finer pockets without making the probability jumps too abrupt."
         )
     else:
         st.info(
@@ -629,13 +678,15 @@ with tab_gb:
             "After the first tree, the remaining residuals are smaller, but they still concentrate in the same region, so the second tree often picks the same split pattern with smaller leaf values."
         )
 
-    metric_columns = st.columns(3, gap="medium")
+    metric_columns = st.columns(4, gap="medium")
     with metric_columns[0]:
         st.metric("Bias score", f"{gb_result['base_score']:+.3f}")
     with metric_columns[1]:
         st.metric("Final raw score", f"{gb_result['raw_score']:+.3f}")
     with metric_columns[2]:
-        st.metric("Final probability", f"{gb_result['probability']:.1%}")
+        st.metric("Raw sigmoid probability", f"{gb_result['raw_probability']:.1%}")
+    with metric_columns[3]:
+        st.metric("Calibrated probability", f"{gb_result['probability']:.1%}")
 
     base_left, base_right = st.columns(2, gap="large")
     positive_count = int(training_data["accepted"].sum())
@@ -643,7 +694,7 @@ with tab_gb:
     with base_left:
         st.subheader("How the bias score is calculated")
         st.write(
-            "Before any learned trees fire, the model starts from the overall population balance."
+            "Before any learned trees fire, the model starts from the overall population balance. Each new tree is then fit with logistic gradients and hessians, so the leaf scores behave more like a real boosting classifier than simple mean residuals."
         )
         st.latex(
             rf"\text{{accepted rate}} = \frac{{{positive_count}}}{{{total_count}}} = {gb_model.base_rate:.3f}"
@@ -664,8 +715,27 @@ with tab_gb:
             rf"\text{{final score}} = {contribution_terms} = {gb_result['raw_score']:+.3f}"
         )
         st.latex(
-            rf"\text{{propensity}} = \sigma(\text{{final score}}) = \frac{{1}}{{1 + e^{{-({gb_result['raw_score']:+.3f})}}}} = {gb_result['probability']:.3f}"
+            rf"\text{{raw probability}} = \sigma(\text{{final score}}) = \frac{{1}}{{1 + e^{{-({gb_result['raw_score']:+.3f})}}}} = {gb_result['raw_probability']:.3f}"
         )
+        st.latex(
+            rf"\text{{calibrated probability}} = \sigma({gb_result['calibration_slope']:+.3f} \cdot \text{{final score}} {gb_result['calibration_intercept']:+.3f}) = {gb_result['probability']:.3f}"
+        )
+        st.caption(
+            "Calibration keeps the learned ranking but adjusts how aggressively raw scores are turned into probabilities."
+        )
+
+    st.subheader("How calibration changes the same final raw score")
+    calibration_summary = pd.DataFrame(
+        {
+            "Final raw score": [f"{gb_result['raw_score']:+.3f}"],
+            "Raw sigmoid probability": [f"{gb_result['raw_probability']:.1%}"],
+            "Calibrated probability": [f"{gb_result['probability']:.1%}"],
+        }
+    )
+    st.table(calibration_summary)
+    st.caption(
+        "The raw sigmoid probability and the calibrated probability are two different transformations of the same final raw score. Calibration does not start from the raw probability; it rescales the raw score and then applies a sigmoid again."
+    )
 
     st.subheader("Pega-style per-tree contribution view")
     gb_round_figure = create_gb_round_figure(
@@ -678,7 +748,7 @@ with tab_gb:
         key=f"gb_round_chart_{scenario}_{probe.age}_{probe.income}_{probe.existing_customer}"
     )
     st.caption(
-        "Bars show the score contributed by the visited node in each tree. The blue line tracks the running mean tree score, and the dotted line shows the running propensity after adding each tree to the bias score."
+        "Bars show the score contributed by the visited node in each tree. The blue line tracks the running mean tree score, and the dotted line shows the calibrated propensity after adding each tree to the bias score."
     )
 
     st.subheader("Tree-by-tree scoring trace")
@@ -692,8 +762,11 @@ with tab_gb:
                 "Raw score after tree": lambda frame: frame[
                     "Raw score after tree"
                 ].round(3),
-                "Propensity after tree": lambda frame: frame[
-                    "Propensity after tree"
+                "Raw probability after tree": lambda frame: frame[
+                    "Raw probability after tree"
+                ].round(3),
+                "Calibrated propensity after tree": lambda frame: frame[
+                    "Calibrated propensity after tree"
                 ].round(3),
             }
         ),
@@ -707,8 +780,11 @@ with tab_gb:
             "Raw score after tree": st.column_config.NumberColumn(
                 "Raw score after tree", format="%.3f"
             ),
-            "Propensity after tree": st.column_config.NumberColumn(
-                "Propensity after tree", format="%.3f"
+            "Raw probability after tree": st.column_config.NumberColumn(
+                "Raw probability after tree", format="%.3f"
+            ),
+            "Calibrated propensity after tree": st.column_config.NumberColumn(
+                "Calibrated propensity after tree", format="%.3f"
             ),
         },
     )
@@ -743,10 +819,11 @@ with tab_gb:
                         ),
                     },
                 )
-                st.markdown("**Residual snapshot before this tree**")
+                st.markdown("**Gradient and hessian snapshot before this tree**")
                 snapshot = round_info.snapshot.copy()
                 snapshot["probability_before"] = snapshot["probability_before"].round(3)
                 snapshot["residual"] = snapshot["residual"].round(3)
+                snapshot["hessian"] = snapshot["hessian"].round(3)
                 snapshot["tree_score"] = snapshot["tree_score"].round(3)
                 snapshot["raw_score"] = snapshot["raw_score"].round(3)
                 snapshot = snapshot.drop(columns=["existing_customer"])
@@ -768,6 +845,9 @@ with tab_gb:
                         ),
                         "residual": st.column_config.NumberColumn(
                             "residual", format="%.3f"
+                        ),
+                        "hessian": st.column_config.NumberColumn(
+                            "hessian", format="%.3f"
                         ),
                         "tree_score": st.column_config.NumberColumn(
                             "tree_score", format="%.3f"
@@ -795,7 +875,7 @@ with tab_gb:
                 st.caption(round_row["Leaf note"])
 
     st.info(
-        "The split search should discover interaction rules such as `Age <= 35` followed by `Income > 10000`, or symbolic rules such as `Existing customer in {Existing}`. That is exactly the kind of conditional logic Naive Bayes does not create.",
+        "The split search should discover interaction rules such as `Age <= 35` followed by `Income > 10000`, or symbolic rules such as `Existing customer in {Existing}`. The logistic-style leaf scores and the calibration layer make the final GB probabilities more realistic than the earlier toy version.",
     )
 
 with tab_compare:
@@ -837,6 +917,7 @@ with tab_compare:
         rows.append(
             {
                 "Scenario": label,
+                "True probability": f"{true_probability(customer.age, customer.income, customer.existing_customer, scenario):.1%}",
                 "Naive Bayes probability": f"{nb_score['probability']:.1%}",
                 "Gradient boosting probability": f"{gb_score['probability']:.1%}",
             }
@@ -846,6 +927,14 @@ with tab_compare:
     show_table(
         comparison_frame,
     )
+    if scenario == "messy_real_world":
+        st.caption(
+            "True probability is the hidden data-generating acceptance probability for each example case. In this scenario it is not limited to 0% or 100%."
+        )
+    else:
+        st.caption(
+            "True probability comes directly from the hidden rule, so the clean scenarios show only 0% or 100%."
+        )
 
     if metric_table is not None:
         st.subheader("Generalization on unseen data")
@@ -913,14 +1002,20 @@ with tab_compare:
         st.caption(
             "For this scenario, `AUC` is the clearest comparison because it reflects how well the models rank unseen customers when the target has overlapping regions and local exceptions."
         )
-        if gb_holdout_auc > nb_holdout_auc + 0.01:
+        if (
+                gb_holdout_auc > nb_holdout_auc + 0.01
+                and gb_holdout_log_loss < nb_holdout_log_loss
+        ):
+            st.success(
+                "On the holdout set, gradient boosting is now better on both ranking and log loss. In this scenario it captures the local pockets more cleanly and, after calibration, turns those scores into probabilities more effectively."
+            )
+        elif gb_holdout_auc > nb_holdout_auc + 0.01:
             st.success(
                 "On the holdout set, gradient boosting ranks customers better here. That is the main lesson of this scenario: GB can carve out local regions and exceptions that Naive Bayes has to average inside broad bins."
             )
-            if gb_holdout_log_loss >= nb_holdout_log_loss:
-                st.caption(
-                    "Naive Bayes can still look competitive on calibration-style metrics in this simplified demo because its probabilities are more conservative. The stronger GB advantage here is structural and ranking-based."
-                )
+            st.caption(
+                "Naive Bayes can still look competitive on calibration-style metrics when its probabilities are more conservative. The stronger GB advantage in that case is structural and ranking-based."
+            )
         else:
             st.warning(
                 "This scenario still makes the structural difference visible, but the holdout ranking advantage is not large enough yet to make a strong claim."

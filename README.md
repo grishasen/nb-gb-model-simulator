@@ -40,5 +40,5 @@ streamlit run app.py
 ## Notes
 
 - The Naive Bayes section is intentionally simplified but uses binned, smoothed log-odds contributions inspired by the Pega ADM explanation. See [ADM Explained in PDSTools](https://pegasystems.github.io/pega-datascientist-tools/articles/ADMExplained.html).
-- The gradient boosting section is also simplified for education: it fits shallow regression trees to logistic residuals so the split logic stays transparent.
+- The gradient boosting section is still educational, but now uses logistic-style gradient/hessian leaf scores, sidebar controls for tree count/depth/learning rate, and a simple calibration layer on top of the final raw score.
 - A presenter-facing walkthrough lives in `docs/DEMO_WIKI.md`.
