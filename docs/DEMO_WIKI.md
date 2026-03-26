@@ -83,78 +83,6 @@ Important caveat:
 - the scoring explanation is now closer to the Pega mental model than the training algorithm itself
 - the current version is more realistic than before because tree leaves now use logistic gradient/hessian information instead of simple mean residuals
 
-## Scenario 3: Messy Real-World Pattern
-
-### Hidden Pattern
-
-This is not a perfect rule-based dataset.
-
-Instead, the probability of acceptance is higher in some regions and lower in others:
-
-- higher for very young customers with sufficiently high income
-- higher for some existing customers with lower income
-- lower in a few local exception pockets
-
-This scenario also includes:
-
-- overlap between accepted and rejected outcomes
-- train and holdout datasets
-- broad bins that hide finer thresholds from Naive Bayes
-
-### Why This Scenario Exists
-
-The first two scenarios teach structure.
-
-This third scenario teaches generalization:
-
-- NB still uses the same broad bins and independent contributions
-- GB can insert extra thresholds inside those broad bins
-- a holdout set lets you show that this matters on unseen data, not just on one probe customer
-
-### Recommended Live Walkthrough
-
-1. Select `Messy Real-World Pattern`.
-2. Open `Story`.
-3. Explain that the shaded regions are now only higher-propensity regions, not deterministic rules.
-4. Point out that there is a `Training Data` section and a `Holdout dataset` section.
-5. Open `Compare`.
-6. Start with the score table and call out these two pairs:
-   - `Age 22 + 14.5k + new`
-   - `Age 34 + 14.5k + new`
-   - `Age 22 + 12.5k + new`
-   - `Age 34 + 12.5k + new`
-7. Explain the key point:
-   - NB gives each pair the same score because both customers fall into the same broad age and income bins
-   - GB separates them because it can place extra age thresholds inside those bins
-8. Stay in `Compare` and show the `Generalization on unseen data` table.
-9. Emphasize that `Holdout AUC` is the main metric to watch here.
-10. Point out that the GB sidebar defaults are stronger here:
-   - more trees
-   - slightly deeper trees
-   - lower learning rate
-11. Explain that the updated GB demo now uses logistic-style leaf scores plus a simple calibration layer, so the probabilities are more realistic than before.
-12. Open `Gradient Boosting`.
-13. Show the tree paths and say:
-   - “These extra thresholds are exactly what let GB pull apart customers who looked identical to Naive Bayes.”
-14. Point to the `Raw sigmoid probability` and `Calibrated probability` metrics and explain the difference.
-15. Open `Naive Bayes`.
-16. Show that NB still has one contribution per broad bin and cannot create those finer pockets inside a bin.
-
-### What To Say
-
-- “Real data is rarely a perfect rectangle.”
-- “Naive Bayes has to summarize each broad band with one contribution.”
-- “Gradient boosting can keep splitting inside that band and create local pockets.”
-- “That is why GB often wins once the data has overlap, exceptions, and hidden finer thresholds.”
-
-### Expected Takeaway
-
-This scenario is best for explaining:
-
-- why GB often ranks real customers better on messy data
-- why independent bin contributions can be too coarse
-- why a holdout set matters when comparing models
-
 ## Scenario 1: Single Positive Region
 
 <img alt="image" src="https://github.com/user-attachments/assets/a634f551-bacb-406f-ab26-00e09574f274" />
@@ -292,6 +220,78 @@ This scenario is best for explaining:
 - why a second tree can look different from the first
 - how boosting handles leftover structure sequentially
 - how symbolic or alternative root splits can appear later
+
+## Scenario 3: Messy Real-World Pattern
+
+### Hidden Pattern
+
+This is not a perfect rule-based dataset.
+
+Instead, the probability of acceptance is higher in some regions and lower in others:
+
+- higher for very young customers with sufficiently high income
+- higher for some existing customers with lower income
+- lower in a few local exception pockets
+
+This scenario also includes:
+
+- overlap between accepted and rejected outcomes
+- train and holdout datasets
+- broad bins that hide finer thresholds from Naive Bayes
+
+### Why This Scenario Exists
+
+The first two scenarios teach structure.
+
+This third scenario teaches generalization:
+
+- NB still uses the same broad bins and independent contributions
+- GB can insert extra thresholds inside those broad bins
+- a holdout set lets you show that this matters on unseen data, not just on one probe customer
+
+### Recommended Live Walkthrough
+
+1. Select `Messy Real-World Pattern`.
+2. Open `Story`.
+3. Explain that the shaded regions are now only higher-propensity regions, not deterministic rules.
+4. Point out that there is a `Training Data` section and a `Holdout dataset` section.
+5. Open `Compare`.
+6. Start with the score table and call out these two pairs:
+   - `Age 22 + 14.5k + new`
+   - `Age 34 + 14.5k + new`
+   - `Age 22 + 12.5k + new`
+   - `Age 34 + 12.5k + new`
+7. Explain the key point:
+   - NB gives each pair the same score because both customers fall into the same broad age and income bins
+   - GB separates them because it can place extra age thresholds inside those bins
+8. Stay in `Compare` and show the `Generalization on unseen data` table.
+9. Emphasize that `Holdout AUC` is the main metric to watch here.
+10. Point out that the GB sidebar defaults are stronger here:
+   - more trees
+   - slightly deeper trees
+   - lower learning rate
+11. Explain that the updated GB demo now uses logistic-style leaf scores plus a simple calibration layer, so the probabilities are more realistic than before.
+12. Open `Gradient Boosting`.
+13. Show the tree paths and say:
+   - “These extra thresholds are exactly what let GB pull apart customers who looked identical to Naive Bayes.”
+14. Point to the `Raw sigmoid probability` and `Calibrated probability` metrics and explain the difference.
+15. Open `Naive Bayes`.
+16. Show that NB still has one contribution per broad bin and cannot create those finer pockets inside a bin.
+
+### What To Say
+
+- “Real data is rarely a perfect rectangle.”
+- “Naive Bayes has to summarize each broad band with one contribution.”
+- “Gradient boosting can keep splitting inside that band and create local pockets.”
+- “That is why GB often wins once the data has overlap, exceptions, and hidden finer thresholds.”
+
+### Expected Takeaway
+
+This scenario is best for explaining:
+
+- why GB often ranks real customers better on messy data
+- why independent bin contributions can be too coarse
+- why a holdout set matters when comparing models
 
 ## Suggested Probe Customers
 
